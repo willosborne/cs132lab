@@ -79,6 +79,10 @@ void setY(int);
 int getInputA(void);
 int getInputB(void);
 
+void drawLine(int, int, int, int);
+void drawVLine(int, int, int);
+void drawHLine(int, int, int);
+
 //#define OUTPUTS RED_LED|AMBER_LED|GREEN_LED|MOTOR_PULSE|MOTOR_DIRECTION
 #define INPUTS RED_SWITCH
 
@@ -255,6 +259,38 @@ void setY(int y) {
 void setX(int x) {
     *SPI_TDR = WRITE_B | (x << 2);
     waitForSPI();
+}
+
+void drawVLine(int x, int startY, int endY) {
+    register int i;
+    setX(x);
+    for (i = startY; i < endY; i++) {
+        setY(i);
+    }
+}
+
+void drawHLine(int y, int startX, int endX) {
+    register int i;
+    setY(y);
+    for (i = startX; i < endX; i++) {
+        setX(i);
+    }
+}
+
+void drawLine(int startX, int startY, int endX, int endY) {
+    float m = (endY - startY) / (endX - startX);
+
+    int interval = 100;
+    float intervalX = (endX - startX) / interval;
+
+    float y = startY;
+    register int x = 0;
+    for (x = startX; x < endX; x += intervalX) {
+        setX(x);
+        setY(y);
+
+        y += m * intervalX;
+    }
 }
 
 void delay(int count)
