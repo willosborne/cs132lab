@@ -156,7 +156,6 @@ int powerupDuration = 0xE00000;
 // how long to wait before spawning a powerup
 int powerupBaseDelay = 0x1900000;
 
-int previousPaddleSize = 200;
 int powerupPaddleSize = 300;
 
 
@@ -164,6 +163,7 @@ void drawPowerup(void);
 void spawnPowerup(void);
 int intersectsPowerup(void);
 void hitPowerup(int);
+void expirePowerup(void);
 
 int main(void)
 {
@@ -620,12 +620,12 @@ void hitPowerup(int player) {
 }
 
 void expirePowerup() {
-    if (powerupState == 2){
+    //if (powerupState == 2){
         player1PaddleSize = player1BaseSize;
-    }
-    else if (powerupSize == 3) {
+    //}
+    //if (powerupSize == 3) {
         player2PaddleSize = player2BaseSize;
-    }
+    //}
     powerupState = 0;
     powerupTimer = powerupBaseDelay;
 }
