@@ -96,13 +96,19 @@ void drawHLine(int, int, int);
 
 // }}}
 
-int ballX = 512;
-int ballY = 512;
-int ballvX = 5;
-int ballvY = 2;
+float ballX = 512;
+float ballY = 512;
+float ballvX = 5;
+float ballvY = 2;
 int player1Input = 0;
 int player2Input = 0;
-int paddleSize = 100;
+int paddleSize = 200;
+
+int player1PaddleSize;
+int player2PaddleSize;
+int player1BaseSize;
+int player2BaseSize;
+
 int player1Score = 0;
 int player2Score = 0;
 int seed = 3;
@@ -111,8 +117,10 @@ int fireworksFrame = 0;
 int fireworkCounter = 0;
 int fireworkFinished = 0;
 int accumulator = 0;
-int frameDelay = 0x130000;
 
+int frameDelay = 0x130000;
+int restartDelay = 0x300000;
+int restartPaused = 1;
 
 int state;
 
@@ -121,6 +129,41 @@ const int FIREWORKS = 1;
 
 void drawChar (int, int, char);
 void changeState (int);
+
+int powerupX;
+int powerupY;
+int powerupSize = 100;
+
+/*
+ * 0 = does not exist
+ * 1 = exists, but has not been activated
+ * 2 = does not exist, but effect is active for player 1
+ * 3 = does not exist, but effect is active for player 2
+ */
+int powerupState = 0;
+
+/*
+ * either: (depends on powerupState)
+ * 0 = how long it's been since the start, or since the last one ended
+ * 1 = how long it's been sitting there for
+ * 2 or 3 = how long it's been active for
+ */
+int powerupTimer = 0;
+
+// how long a powerup should last for
+int powerupDuration = 0xE00000;
+
+// how long to wait before spawning a powerup
+int powerupBaseDelay = 0x1900000;
+
+int previousPaddleSize = 200;
+int powerupPaddleSize = 300;
+
+
+void drawPowerup(void);
+void spawnPowerup(void);
+int intersectsPowerup(void);
+void hitPowerup(int);
 
 int main(void)
 {
@@ -176,25 +219,22 @@ int main(void)
 
     *ADC_MR = 0x030b0400; // sample+holdtime = 3, startup = b, prescale = 4
 
-    //*PIO_PER = INPUTS; // Enable control of I/O pin from PIO Controller
-    //*PIO_OER = OUTPUTS; // Enable output driver for pin
-    //*PIO_IFER = INPUTS; // Turn on filter for inputs
-
-
-    //int WRITE_B = 0x4000; //0b0100000000000000;
-    //int WRITE_A = 0xc000; //0b1100000000000000;
-    //*SPI_TDR = WRITE_TO_B_AND_BUFFER; // write 32 to buffer and B
-    //*SPI_TDR = WRITE_TO_A_UPDATE_B; // write 32 to A
-
-    //*SPI_TDR = WRITE_A | (0 << 2);
-
-    //waitForSPI();
 
     seed = getInputA() * getInputB();
     state = GAME;
 
+    player1PaddleSize = paddleSize;
+    player2PaddleSize = paddleSize;
+    player1BaseSize = paddleSize;
+    player2BaseSize = paddleSize;
+
+    powerupState = 0; // no powerup
+    powerupTimer = powerupBaseDelay;
+
     while(1) {
         if (state == GAME) {
+
+
             //draw bounding box
             register int i = 0;
 
@@ -230,10 +270,10 @@ int main(void)
             player2Input = adjustInput(player2Input);
 
             player2Input -= 190;
-            if (player1Input + paddleSize > 950)
-                player1Input = 950 - paddleSize;
-            if (player2Input + paddleSize > 950)
-                player2Input = 950 - paddleSize;
+            if (player1Input + player1PaddleSize > 950)
+                player1Input = 950 - player1PaddleSize;
+            if (player2Input + player2PaddleSize > 950)
+                player2Input = 950 - player2PaddleSize;
 
             if (player1Input < 50)
                 player1Input = 50;
@@ -241,8 +281,8 @@ int main(void)
             if (player2Input < 50)
                 player2Input = 50;
 
-            drawVLine(75, player1Input, player1Input + paddleSize);
-            drawVLine(925, player2Input, player2Input + paddleSize);
+            drawVLine(75, player1Input, player1Input + player1PaddleSize);
+            drawVLine(925, player2Input, player2Input + player2PaddleSize);
 
 
 
@@ -257,32 +297,74 @@ int main(void)
 
 
             // move ball by velocity
-            ballX += ballvX;
-            ballY += ballvY;
+            if (!restartPaused) {
+                ballX += ballvX;
+                ballY += ballvY;
 
-            if (ballY - player1Input <= paddleSize && ballY > player1Input) {
+                if (powerupState != 1)
+                    powerupTimer -= 0x8000;
+                
+                if (powerupTimer <= 0) {
+                    // powerup timer has expired:
+                    if (powerupState == 0) {
+                        spawnPowerup();
+                    }
+                    else if (powerupState == 1) {
+                        // do nothing ; we don't want our powerups to expire
+                    }
+                    else {
+                        // make powerup effect wear off
+                        expirePowerup();
+                    }
+                }
+            }
+
+            if (powerupState == 1) {
+                drawPowerup();
+                if (intersectsPowerup()) {
+                    if (ballvX < 0) {
+                        // player 2 hit the powerup
+                        hitPowerup(2);
+                    }
+                    else if (ballvX > 0) {
+                        // player 1 hit the powerup
+                        hitPowerup(1);
+                    }
+                }
+            }
+
+            // ball hits player 1 paddle
+            if (ballY - player1Input <= player1PaddleSize && ballY > player1Input) {
+                float intersection = ballY - (player1Input + player1PaddleSize / 2);
                 if (ballX < 75 && ballX > 50){
                     ballvX = -ballvX;
+                    ballvX += 0.75f;
                     ballX = 75;
+
+                    ballvY = (intersection / (player1PaddleSize/2)) * 7;
                 }
             }
-            if (ballY - player2Input <= paddleSize && ballY > player2Input) {
+
+            // ball hits player 2 paddle
+            if (ballY - player2Input <= player2PaddleSize && ballY > player2Input) {
+                float intersection = ballY - (player1Input + player2PaddleSize / 2);
+
                 if (ballX > 925 && ballX < 950){
                     ballvX = -ballvX;
+                    ballvY -= 0.75f;
                     ballX = 925;
+
+                    ballvY = (intersection / (player2PaddleSize/2)) * 7;
                 }
             }
+            if (ballvY > 7)
+                ballvY = 7;
+            if (ballvY < -7)
+                ballvY = -7;
 
             if(ballY > 950 || ballY < 50)
                 ballvY = -ballvY;
-            if(ballX > 950) {
-                resetBall(1);
-                player1Score++;
-            }
-            if(ballX < 50) {
-                resetBall(-1);
-                player2Score++;
-            }
+
 
             if (player1Score > 9) 
                 changeState(FIREWORKS);
@@ -293,9 +375,30 @@ int main(void)
             drawChar(300, 700, '0'+player1Score);
             drawChar(600, 700, '0'+player2Score);
 
-            setX(ballX);
-            setY(ballY);
+            setX((int)ballX);
+            setY((int)ballY);
 
+            if (restartPaused) {
+                accumulator += 0x8000;
+                powerupState = 0;
+                powerupTimer = powerupBaseDelay;
+                if (accumulator > restartDelay) {
+                    accumulator = 0;
+                    restartPaused = 0;
+                }
+            }
+            if(ballX > 950) {
+                player1Score++;
+                player1BaseSize -= 10;
+                resetBall(1);
+                //previousPaddleSize = player1PaddleSize;
+            }
+            if(ballX < 50) {
+                player2Score++;
+                player2BaseSize -= 10;
+                resetBall(-1);
+                //previousPaddleSize = player2PaddleSize;
+            }
 
 
             delay(0x8000);
@@ -316,8 +419,8 @@ int main(void)
                 drawChar(750, 300, '5');
             }
             if (player2Score > player1Score){
-                drawChar(200, 300, 'p');
-                drawChar(250, 300, '1');
+                drawChar(180, 300, 'p');
+                drawChar(290, 300, '2');
                 drawChar(450, 300, 'w');
                 drawChar(530, 300, '1');
                 drawChar(650, 300, 'n');
@@ -435,11 +538,18 @@ void changeState(int newState) {
         accumulator = 0;
         fireworkCounter = 0;
         fireworkFinished = 0;
+        accumulator = 0;
     }
     if (newState == GAME){
         resetBall(1);
+        restartPaused = 1;
+        accumulator = 0;
         player1Score = 0;
         player2Score = 0;
+        player1PaddleSize = paddleSize;
+        player2PaddleSize = paddleSize;
+        player1BaseSize = paddleSize;
+        player2BaseSize = paddleSize;
     }
 }
 
@@ -455,7 +565,69 @@ void resetBall(int player) {
     ballvY = rand() - 5;
     while (ballvY == 0)
         ballvY = rand() - 5;
+    restartPaused = 1;
+    accumulator = 0;
+
+    player1PaddleSize = player1BaseSize;
+    player2PaddleSize = player2BaseSize;
+
+    /* if (powerupState == 2) */
+    /*     player1PaddleSize = previousPaddleSize; */
+    /* else if (powerupState = 3) */
+    /*     player2PaddleSize = previousPaddleSize; */
+
+    powerupState = 0;
+    powerupTimer = powerupBaseDelay;
     //delay(0x90000);
+}
+
+void drawPowerup() {
+    drawVLine(powerupX, powerupY, powerupY + powerupSize);
+    drawVLine(powerupX + powerupSize, powerupY, powerupY + powerupSize);
+
+    drawHLine(powerupY, powerupX, powerupX + powerupSize);
+    drawHLine(powerupY + powerupSize, powerupX, powerupX + powerupSize);
+}
+
+int intersectsPowerup() {
+    if (ballX > powerupX && ballX < powerupX + powerupSize && ballY > powerupY && ballY < powerupY + powerupSize)
+        return 1;
+    else
+        return 0;
+}
+
+void spawnPowerup() {
+    powerupState = 1;
+    powerupX = 500;
+    powerupY = 500;
+
+    powerupY += (rand() - 5) * 50;
+}
+
+void hitPowerup(int player) {
+    // set powerup state based on who hit the powerup
+    if (player == 1) {
+        powerupState = 2;
+        //previousPaddleSize = player1PaddleSize;
+        player1PaddleSize = powerupPaddleSize;
+    }
+    else if (player == 2) {
+        powerupState = 3;
+        //previousPaddleSize = player2PaddleSize;
+        player2PaddleSize = powerupPaddleSize;
+    }
+    powerupTimer = powerupDuration;
+}
+
+void expirePowerup() {
+    if (powerupState == 2){
+        player1PaddleSize = player1BaseSize;
+    }
+    else if (powerupSize == 3) {
+        player2PaddleSize = player2BaseSize;
+    }
+    powerupState = 0;
+    powerupTimer = powerupBaseDelay;
 }
 
 /// {{{
