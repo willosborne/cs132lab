@@ -51,34 +51,21 @@ typedef volatile unsigned int ioreg;
 
 
 // {{{
-//#define RED_LED		0x00000004 // 00100
-#define RED_LED     (1 << 4)
-#define AMBER_LED   (1 << 3)
-#define GREEN_LED   (1 << 2)
-
-#define MOTOR_PULSE             (1 << 0)
-#define MOTOR_DIRECTION         (1 << 1)
-
-#define REDAMBER RED_LED|AMBER_LED
-#define REDGREEN RED_LED|GREEN_LED
-#define AMBERGREEN AMBER_LED|GREEN_LED
-
-#define GREEN_SWITCH   (1 << 20)
-#define RED_SWITCH     (1 << 30)
-#define OPTO_DETECTOR  (1 << 25)
 
 #define PIO_IDENTIFIER 0x34 // 0b110100
 
+// These two constants set bits 12-15 of the message we send to the chip
+#define WRITE_B  0x4000 //0b0100000000000000; - R1 0, SPD 1, PWR 0, R0 0 (i.e. write to port B + buffer)
+#define WRITE_A  0xc000 //0b1100000000000000; - R1 1, SPD 1, PWR 0, R0 0 (i.e. write to port A + update B with buffer)
 
-#define WRITE_B  0x4000 //0b0100000000000000;
-#define WRITE_A  0xc000 //0b1100000000000000;
+/*
+ * FUNCTION SIGNATURES: see definitions for details on each function
+ */
 
 void waitForSPI(void);
 void setX(int);
 void setY(int);
-
 void drawFirework(int, int);
-
 void delay(int);
 int getInputA(void);
 int getInputB(void);
@@ -90,16 +77,27 @@ void drawLine(int, int, int, int);
 void drawVLine(int, int, int);
 void drawHLine(int, int, int);
 
-//#define OUTPUTS RED_LED|AMBER_LED|GREEN_LED|MOTOR_PULSE|MOTOR_DIRECTION
-#define INPUTS RED_SWITCH
+void drawChar (int, int, char);
+void changeState (int);
+
+void drawPowerup(void);
+void spawnPowerup(void);
+int intersectsPowerup(void);
+void hitPowerup(int);
+void expirePowerup(void);
 
 
 // }}}
+
+/*
+ * GLOBAL VARIABLES
+ */
 
 float ballX = 512;
 float ballY = 512;
 float ballvX = 5;
 float ballvY = 2;
+
 int player1Input = 0;
 int player2Input = 0;
 int paddleSize = 200;
@@ -123,17 +121,15 @@ int restartDelay = 0x300000;
 int restartPaused = 1;
 
 int state;
-
 const int GAME = 0;
 const int FIREWORKS = 1;
 
-void drawChar (int, int, char);
-void changeState (int);
-
+// x of powerup on screen
 int powerupX;
+// y of powerup on screen
 int powerupY;
+// side length of powerup
 int powerupSize = 100;
-
 /*
  * 0 = does not exist
  * 1 = exists, but has not been activated
@@ -141,7 +137,6 @@ int powerupSize = 100;
  * 3 = does not exist, but effect is active for player 2
  */
 int powerupState = 0;
-
 /*
  * either: (depends on powerupState)
  * 0 = how long it's been since the start, or since the last one ended
@@ -149,22 +144,15 @@ int powerupState = 0;
  * 2 or 3 = how long it's been active for
  */
 int powerupTimer = 0;
-
 // how long a powerup should last for
 int powerupDuration = 0xE00000;
-
 // how long to wait before spawning a powerup
 int powerupBaseDelay = 0x1900000;
-
+// how large to make the paddles when under the effects of the powerup
 int powerupPaddleSize = 300;
 
 
-void drawPowerup(void);
-void spawnPowerup(void);
-int intersectsPowerup(void);
-void hitPowerup(int);
-void expirePowerup(void);
-
+// entry point
 int main(void)
 {
     /*
@@ -178,28 +166,22 @@ int main(void)
      */
 
     /*
-     * SETUP
+     * SETUP FUNCTIONS
      */
 
-    LowLevelInit(); //setup
-    *PMC_PCER = PIO_IDENTIFIER;
+    LowLevelInit(); //setup, we don't need to know about this
+    *PMC_PCER = PIO_IDENTIFIER; // set up what mode the chip should be in - so we want to be using PIO controller A and the Analog-Digital converter
     *PIO_PDR = 0x7800; // disable bits 11-14
     *PIO_ASR = 0x7800;  // peripheral A is using 11-14
-    *SPI_CR = 0x80; // reset serial interface
+    *SPI_CR = 0x80; // reset serial interface to ensure no errors occur
     *SPI_CR = 0x1; // enable it
 
     /* 
      * CONFIGURE SPI
      */
-
-    *SPI_MR = 0x11; // spi to master mode, turn off fault detection
+    *SPI_MR = 0x11; // spi to master mode, turn off fault detection, need this for it to work
     *SPI_CSR0 = 0x183; //clock polarity = 1, clock phase = 1, bits/transfer 16, baud raite = 1
-
     *SPI_TDR = 0xd002; // reference voltage to 2
-
-    waitForSPI();
-
-
     /*
      * 0xd002 in binary is 1101 0000 0000 0010
      * Format is R1, SPD, PWR, R0, [12 bits of data].
@@ -211,6 +193,9 @@ int main(void)
      * R0, R1 = 1 means "write to control register."
      * So we write 2 to control register meaning set ref. voltage to 2.
      */
+    
+    // wait until SPI is ready
+    waitForSPI();
 
     //INPUT SETUP
 
@@ -220,7 +205,10 @@ int main(void)
     *ADC_MR = 0x030b0400; // sample+holdtime = 3, startup = b, prescale = 4
 
 
+    //set seed for RNG
     seed = getInputA() * getInputB();
+
+    // game setup
     state = GAME;
 
     player1PaddleSize = paddleSize;
@@ -228,90 +216,69 @@ int main(void)
     player1BaseSize = paddleSize;
     player2BaseSize = paddleSize;
 
-    powerupState = 0; // no powerup
+    powerupState = 0; // no powerup at the moment
     powerupTimer = powerupBaseDelay;
 
+    // main loop
     while(1) {
+        // FSM - while it's in game state
         if (state == GAME) {
 
 
             //draw bounding box
-            register int i = 0;
-
-            /* setX(50); */
-            /* for (i = 0; i < 1023; i++) { */
-            /*     setY(i); */
-            /* } */
-            /* setX(950); */
-            /* for (i = 0; i < 1023; i++) { */
-            /*     setY(i); */
-            /* } */
-            /* setY(50); */
-            /* for (i = 0; i < 1023; i++) { */
-            /*     setX(i); */
-            /* } */
-            /* setY(950); */
-            /* for (i = 0; i < 1023; i++) { */
-            /*     setX(i); */
-            /* } */
-
             drawVLine(50, 50, 950);
             drawVLine(950, 50, 950);
 
             drawHLine(50, 50, 950);
             drawHLine(950, 50, 950);
-            //get input from players
+
+
+            //get input from players and adjust it - we take 190 away to get the offsets working properly
             player1Input = getInputA();
             player1Input = adjustInput(player1Input);
-
             player1Input -= 190;
 
             player2Input = getInputB();
             player2Input = adjustInput(player2Input);
-
             player2Input -= 190;
+
+            // make sure player paddles are on the screen 
             if (player1Input + player1PaddleSize > 950)
                 player1Input = 950 - player1PaddleSize;
             if (player2Input + player2PaddleSize > 950)
                 player2Input = 950 - player2PaddleSize;
-
             if (player1Input < 50)
                 player1Input = 50;
-
             if (player2Input < 50)
                 player2Input = 50;
 
+            //draw the paddles
             drawVLine(75, player1Input, player1Input + player1PaddleSize);
             drawVLine(925, player2Input, player2Input + player2PaddleSize);
 
-
-
-            //draw paddles
-
-            //setX(75);
-
-
-            /* drawLine(100, 200, 700, 900); */
-            //setY()
-
-
-
-            // move ball by velocity
+            // if the game is paused between points, stop the game logic but keep the rendering going
             if (!restartPaused) {
+
+                //update ball position
                 ballX += ballvX;
                 ballY += ballvY;
 
+                // if the powerup timer needs to be counting, make it count down
                 if (powerupState != 1)
                     powerupTimer -= 0x8000;
                 
+                // when it hits zero, trigger an effect based on its state
                 if (powerupTimer <= 0) {
-                    // powerup timer has expired:
+
+                    // no powerup at the moment, spawn one
                     if (powerupState == 0) {
                         spawnPowerup();
                     }
+                    // powerup currently spawned, do nothing
                     else if (powerupState == 1) {
                         // do nothing ; we don't want our powerups to expire
                     }
+                    // one of the players has the powerup, make it wear off
                     else {
                         // make powerup effect wear off
                         expirePowerup();
@@ -319,8 +286,11 @@ int main(void)
                 }
             }
 
+            // if the powerup is on screen, draw it and check if someone has hit it
             if (powerupState == 1) {
                 drawPowerup();
+
+                // if someone has hit it, check based on which way the ball is moving who it was
                 if (intersectsPowerup()) {
                     if (ballvX < 0) {
                         // player 2 hit the powerup
@@ -357,50 +327,61 @@ int main(void)
                     ballvY = (intersection / (player2PaddleSize/2)) * 7;
                 }
             }
+
+            // clamp ball vertical speed
             if (ballvY > 7)
                 ballvY = 7;
             if (ballvY < -7)
                 ballvY = -7;
 
+            // bounce on top+bottom of screen
             if(ballY > 950 || ballY < 50)
                 ballvY = -ballvY;
 
-
+            // detect game over
             if (player1Score > 9) 
                 changeState(FIREWORKS);
             if (player2Score > 9)
                 changeState(FIREWORKS);
 
-            //y *= 2;
+            // draw scores
             drawChar(300, 700, '0'+player1Score);
             drawChar(600, 700, '0'+player2Score);
 
+            // draw the ball LAST to ensure it's brightest
             setX((int)ballX);
             setY((int)ballY);
 
+            // if we are paused, update all the timers to make sure we unpause at the right time
             if (restartPaused) {
                 accumulator += 0x8000;
+                // also reset the powerup
                 powerupState = 0;
                 powerupTimer = powerupBaseDelay;
+
+                // start game when time is up
                 if (accumulator > restartDelay) {
                     accumulator = 0;
                     restartPaused = 0;
                 }
             }
+
+            // player 1 has scored
             if(ballX > 950) {
                 player1Score++;
                 player1BaseSize -= 10;
+                // resetBall takes one argument, 1 or -1, which tells it which way to make the ball move when it restarts
                 resetBall(1);
-                //previousPaddleSize = player1PaddleSize;
             }
+
+            // player 2 has scored
             if(ballX < 50) {
                 player2Score++;
                 player2BaseSize -= 10;
                 resetBall(-1);
-                //previousPaddleSize = player2PaddleSize;
             }
 
-
+            // delay and end loop
             delay(0x8000);
 
             /* if ((*PIO_PDSR & RED_SWITCH) != RED_SWITCH) { */
@@ -408,8 +389,9 @@ int main(void)
             /* } */    
         }
 
+        // if we're in firework mode
         else if (state == FIREWORKS) {
-            
+            // draw the win messages for player 1 or two based on the score
             if (player1Score > player2Score){
                 drawChar(200, 300, 'p');
                 drawChar(250, 300, '1');
