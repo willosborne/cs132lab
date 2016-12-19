@@ -1,4 +1,4 @@
-//#include <stdlib.h>
+// save us writing volatile unsigned int* for every register
 typedef volatile unsigned int ioreg;
 
 // register containing which pins we want to enable
@@ -19,12 +19,9 @@ typedef volatile unsigned int ioreg;
 // register containing which outputs we want to switch off
 #define	PIO_CODR  	(ioreg *) 0xfffff434	// Clear Output Data Register
 
+// pin data status register - we aren't using pins, but define it anyway just in case we need it
 #define PIO_PDSR    (ioreg *) 0xfffff43c
 
-
-/*
- * ---------------- NEW DEFINITIONS -----------------------
- */
 
 #define PIO_PDR (ioreg *) 0xfffff404 // PIO disable register
 #define PIO_ASR (ioreg *) 0xfffff470 // PIO A select register
@@ -50,8 +47,11 @@ typedef volatile unsigned int ioreg;
  */
 
 
+// vim code folding marker
 // {{{
 
+// we're going to set PMC_PCER to this on init.
+// set bits 2, 4 and 5; this means we want to use Parallel I/O controller A, the Analog-to-Digital converter and the Serial Peripheral Interface respectively.
 #define PIO_IDENTIFIER 0x34 // 0b110100
 
 // These two constants set bits 12-15 of the message we send to the chip
@@ -86,40 +86,53 @@ int intersectsPowerup(void);
 void hitPowerup(int);
 void expirePowerup(void);
 
-
+// code folding, ignore
 // }}}
 
 /*
  * GLOBAL VARIABLES
  */
 
+// information about ball position and velocity. Stored as floats to make life easier, then casted to ints for rendering.
 float ballX = 512;
 float ballY = 512;
 float ballvX = 5;
 float ballvY = 2;
 
+// hold the values from the two knobs
 int player1Input = 0;
 int player2Input = 0;
+
+// the default paddle size
 int paddleSize = 200;
 
+// keep track of how big each player's paddle should be, and how big it is at the moment (for use with the powerup)
 int player1PaddleSize;
 int player2PaddleSize;
 int player1BaseSize;
 int player2BaseSize;
 
+// scores
 int player1Score = 0;
 int player2Score = 0;
+
+// for the "random number generator"
 int seed = 3;
 
+// animation information for the fireworks
 int fireworksFrame = 0;
 int fireworkCounter = 0;
 int fireworkFinished = 0;
-int accumulator = 0;
 
+// holds the time value - when this goes over a certain value it'll advance the animation by 1 frame
+int accumulator = 0;
 int frameDelay = 0x130000;
+
+// how long to wait for after every pause
 int restartDelay = 0x300000;
 int restartPaused = 1;
 
+// what state the game's in
 int state;
 const int GAME = 0;
 const int FIREWORKS = 1;
@@ -193,7 +206,7 @@ int main(void)
      * R0, R1 = 1 means "write to control register."
      * So we write 2 to control register meaning set ref. voltage to 2.
      */
-    
+
     // wait until SPI is ready
     waitForSPI();
 
@@ -211,6 +224,7 @@ int main(void)
     // game setup
     state = GAME;
 
+    // set everything to default values
     player1PaddleSize = paddleSize;
     player2PaddleSize = paddleSize;
     player1BaseSize = paddleSize;
@@ -223,8 +237,6 @@ int main(void)
     while(1) {
         // FSM - while it's in game state
         if (state == GAME) {
-
-
             //draw bounding box
             drawVLine(50, 50, 950);
             drawVLine(950, 50, 950);
@@ -233,7 +245,7 @@ int main(void)
             drawHLine(950, 50, 950);
 
 
-            //get input from players and adjust it - we take 190 away to get the offsets working properly
+            //get input from players and adjust it - we take 190 away to get the offsets working properly (otherwise it renders the line in the wrong place)
             player1Input = getInputA();
             player1Input = adjustInput(player1Input);
             player1Input -= 190;
@@ -266,7 +278,7 @@ int main(void)
                 // if the powerup timer needs to be counting, make it count down
                 if (powerupState != 1)
                     powerupTimer -= 0x8000;
-                
+
                 // when it hits zero, trigger an effect based on its state
                 if (powerupTimer <= 0) {
 
@@ -305,17 +317,22 @@ int main(void)
 
             // ball hits player 1 paddle
             if (ballY - player1Input <= player1PaddleSize && ballY > player1Input) {
+                // calculate the difference between the centre of the paddle and the ball, then use this to set the new velocity for the ball - allows for player control over the ball
+                // this is based on the original Pong game (uses slightly different numbers, though)
                 float intersection = ballY - (player1Input + player1PaddleSize / 2);
                 if (ballX < 75 && ballX > 50){
+                    // flip ball X velocity and increase it slightly
                     ballvX = -ballvX;
                     ballvX += 0.75f;
+
+                    // clamp X position to stop it going off screen when it's really fast
                     ballX = 75;
 
                     ballvY = (intersection / (player1PaddleSize/2)) * 7;
                 }
             }
 
-            // ball hits player 2 paddle
+            // ball hits player 2 paddle - this is exactly the same as for player 1 but with tweaked values
             if (ballY - player2Input <= player2PaddleSize && ballY > player2Input) {
                 float intersection = ballY - (player1Input + player2PaddleSize / 2);
 
@@ -344,11 +361,11 @@ int main(void)
             if (player2Score > 9)
                 changeState(FIREWORKS);
 
-            // draw scores
+            // draw scores - add the score on to the char '0' to give us a number (this means we can't have a score greater than 9)
             drawChar(300, 700, '0'+player1Score);
             drawChar(600, 700, '0'+player2Score);
 
-            // draw the ball LAST to ensure it's brightest
+            // draw the ball LAST to ensure it's brightest, and clamp the position to integers. This might cause issues, but they're pretty minor considering the range is 0-1023
             setX((int)ballX);
             setY((int)ballY);
 
@@ -378,6 +395,7 @@ int main(void)
             if(ballX < 50) {
                 player2Score++;
                 player2BaseSize -= 10;
+                // resetBall takes one argument, 1 or -1, which tells it which way to make the ball move when it restarts
                 resetBall(-1);
             }
 
@@ -409,6 +427,7 @@ int main(void)
                 drawChar(750, 300, '5');
             }
 
+            // draw fireworks one after another
             if (fireworkCounter == 0)
                 drawFirework(512, 512);
             else if (fireworkCounter == 1)
@@ -421,30 +440,17 @@ int main(void)
                 drawFirework(400, 600);
             else if (fireworkCounter == 5)
                 drawFirework(700, 200);
-            ///fireworkCounter++;
+            // when we're done, go back to the game
             if (fireworkCounter > 5)
                 changeState(GAME);
         }
-        // 0xd### writes the bits contained in ### to the control register in fast mode.
-
-        //int INPUTS = 0;
-
-        //*PIO_PER = RED_LED; // Enable control of I/O pin from PIO Controller
-        //*PIO_OER = RED_LED; // Enable output driver for pin
-        /* *PIO_PER = OUTPUTS|INPUTS; // Enable control of I/O pin from PIO Controller */
-        //*PIO_OER = OUTPUTS; // Enable output driver for pin
-        /* *PIO_IFER = INPUTS; // Turn on filter for inputs */
-        //*PMC_PCER = PIO_IDENTIFIER; //enable the clock (regularly check if the inputs have changed -i.e. enable inputs)
-
-        //*PIO_CODR = OUTPUTS; //clear all outputs
-
-        //int PIN_6 = (1 << 5); // take 00000001, shift it left 5 times -> 0100000
-
     }
 }
 
+// draw a firework animation at the X and Y co-ordinates given. 
 void drawFirework(int x, int y){
-
+    // this basically works by drawing lots and lots of lines in the shape of a basic firework.
+    // we tweak the values for each frame to make it grow
     int width = 150;
     int diagonal = 110;
 
@@ -500,6 +506,9 @@ void drawFirework(int x, int y){
         drawLine(x - diagonal, y + diagonal, x - diagonal - diagonal+tweak, y + diagonal +  diagonal-tweak);
         delay(0x8000);
     }
+
+    // this stuff handles the animation
+    // add the time we've delayed for to the accumulator every frame, and when it reaches the delay threshold, we advance the frame and reset the accumulator.
     accumulator += 0x8000;
     if (accumulator > frameDelay) {
         fireworksFrame++;
@@ -510,11 +519,12 @@ void drawFirework(int x, int y){
 
         fireworkCounter++;
     }
-
 }
 
+// switch state
 void changeState(int newState) {
     state = newState;
+    // basically, we reset everything whenever we enter a new state.
     if (newState == FIREWORKS) {
         fireworksFrame = 0;
         accumulator = 0;
@@ -523,7 +533,9 @@ void changeState(int newState) {
         accumulator = 0;
     }
     if (newState == GAME){
+        // ball always goes the same way on a new game for simplicity
         resetBall(1);
+        // we pause at the start of a new game
         restartPaused = 1;
         accumulator = 0;
         player1Score = 0;
@@ -535,34 +547,38 @@ void changeState(int newState) {
     }
 }
 
+// random number generator - uses a Linear Congruential Generator to generate very simple random numbers from 0 to 10.
 int rand() {
     seed = (2 * seed + 3) % 10;
     return seed;
 }
 
+// reset the ball - the player argument is either 1 or -1 and decides which X direction the ball will move in.
 void resetBall(int player) {
+    // reset position
     ballX = 512;
     ballY = 512;
+    // reset velocity on x axis to a constant * the player factor
     ballvX = 5 * player;
+    // use our RNG to get the Y velocity, but subtract 5 to make it from -5 to 5
     ballvY = rand() - 5;
     while (ballvY == 0)
         ballvY = rand() - 5;
+    // pause afterwards and reset accumulator
     restartPaused = 1;
     accumulator = 0;
 
+    // reset paddle sizes
     player1PaddleSize = player1BaseSize;
     player2PaddleSize = player2BaseSize;
 
-    /* if (powerupState == 2) */
-    /*     player1PaddleSize = previousPaddleSize; */
-    /* else if (powerupState = 3) */
-    /*     player2PaddleSize = previousPaddleSize; */
-
+    // reset powerup states
     powerupState = 0;
     powerupTimer = powerupBaseDelay;
     //delay(0x90000);
 }
 
+// draws a box at the powerup location
 void drawPowerup() {
     drawVLine(powerupX, powerupY, powerupY + powerupSize);
     drawVLine(powerupX + powerupSize, powerupY, powerupY + powerupSize);
@@ -571,6 +587,7 @@ void drawPowerup() {
     drawHLine(powerupY + powerupSize, powerupX, powerupX + powerupSize);
 }
 
+// returns 1 if the ball intersects the powerup. Could be shorter but wrote it like this for simplicity
 int intersectsPowerup() {
     if (ballX > powerupX && ballX < powerupX + powerupSize && ballY > powerupY && ballY < powerupY + powerupSize)
         return 1;
@@ -578,14 +595,19 @@ int intersectsPowerup() {
         return 0;
 }
 
+// spawn the powerup
 void spawnPowerup() {
+    // change the state
     powerupState = 1;
+    // set an initial position of the middle of the screen
     powerupX = 500;
     powerupY = 500;
 
+    // adjust the Y position by a random value from -250 to 250
     powerupY += (rand() - 5) * 50;
 }
 
+// called when the ball hits the
 void hitPowerup(int player) {
     // set powerup state based on who hit the powerup
     if (player == 1) {
@@ -598,31 +620,32 @@ void hitPowerup(int player) {
         //previousPaddleSize = player2PaddleSize;
         player2PaddleSize = powerupPaddleSize;
     }
+    // set the timer to duration (as state 2 or 3 means a player has an active powerup)
     powerupTimer = powerupDuration;
 }
 
+// called when the powerup runs out
 void expirePowerup() {
-    //if (powerupState == 2){
-        player1PaddleSize = player1BaseSize;
-    //}
-    //if (powerupSize == 3) {
-        player2PaddleSize = player2BaseSize;
-    //}
+    // reset the paddles to their base sizes
+    player1PaddleSize = player1BaseSize;
+    player2PaddleSize = player2BaseSize;
+    // change state and set timer accordingly
     powerupState = 0;
     powerupTimer = powerupBaseDelay;
 }
 
-/// {{{
+// vim comment folding marker, use :set foldmethod=marker to hide this extremely large function
+// {{{
+// draws a single character at the x and y co-ords given.
+// supported chars: '0' to '9', 'p', 'w' and 'n'
 void drawChar (int x, int y, char toDraw) {
+    // height and width of a single segment of the character.
     int height = 100;
     int width = 80;
+
+    // works by drawing a large number of vertical or horizontal lines, and occasionally a diagonal for the letters.
     switch (toDraw) {
         case '0':
-            //drawLine(x, y, x, y+height);
-            //drawLine(x, y+height, x+width, y+height);
-            //drawLine(x+width, y, x+width, y+height);
-            //drawLine(x, y, x+width, y);
-            //
             drawVLine(x, y, y+height/2);
             drawVLine(x, y+height/2, y+height);
 
@@ -633,74 +656,47 @@ void drawChar (int x, int y, char toDraw) {
 
             drawHLine(y+height, x, x+width);
 
-            //drawHLine(y+height/2, x, x+width);
             break;
         case '1':
-            //drawVLine(x, y, y+height/2);
-            //drawVLine(x, y+height/2, y+height);
 
             drawVLine(x+width, y, y+height/2);
             drawVLine(x+width, y+height/2, y+height);
 
-            //drawHLine(y, x, x+width/2);
-            //drawHLine(y, x+width/2, x+width);
-
-            //drawHLine(y+height, x, x+width/2);
-            //drawHLine(y+height, x+width/2, x+width);
-
-            //drawHLine(y+height/2, x, x+width);
             break;
         case '2':
             drawVLine(x, y, y+height/2);
-            //drawVLine(x, y+height/2, y+height);
-
-            //drawVLine(x+width, y, y+height/2);
             drawVLine(x+width, y+height/2, y+height);
 
             drawHLine(y, x, x+width);
-            //drawHLine(y, x+width/2, x+width);
 
             drawHLine(y+height, x, x+width);
-            //drawHLine(y+height, x+width/2, x+width);
 
             drawHLine(y+height/2, x, x+width);
             break;
         case '3':
-            //drawVLine(x, y, y+height/2);
-            //drawVLine(x, y+height/2, y+height);
 
             drawVLine(x+width, y, y+height/2);
             drawVLine(x+width, y+height/2, y+height);
 
             drawHLine(y, x, x+width);
-            //drawHLine(y, x+width/2, x+width);
 
             drawHLine(y+height, x, x+width);
-            //drawHLine(y+height, x+width/2, x+width);
 
             drawHLine(y+height/2, x, x+width);
             break;
         case '4':
-            //drawVLine(x, y, y+height/2);
             drawVLine(x, y+height/2, y+height);
 
             drawVLine(x+width, y, y+height/2);
             drawVLine(x+width, y+height/2, y+height);
 
-            //drawHLine(y, x, x+width/2);
-            //drawHLine(y, x+width/2, x+width);
-
-            //drawHLine(y+height, x, x+width);
-            //drawHLine(y+height, x+width/2, x+width);
 
             drawHLine(y+height/2, x, x+width);
             break;
         case '5':
-            //drawVLine(x, y, y+height/2);
             drawVLine(x, y+height/2, y+height);
 
             drawVLine(x+width, y, y+height/2);
-            //drawVLine(x+width, y+height/2, y+height);
 
             drawHLine(y, x, x+width);
 
@@ -714,7 +710,6 @@ void drawChar (int x, int y, char toDraw) {
             drawVLine(x, y+height/2, y+height);
 
             drawVLine(x+width, y, y+height/2);
-            //drawVLine(x+width, y+height/2, y+height);
 
             drawHLine(y, x, x+width);
 
@@ -724,17 +719,13 @@ void drawChar (int x, int y, char toDraw) {
             break;
         case '7':
 
-            //drawVLine(x, y, y+height/2);
-            //drawVLine(x, y+height/2, y+height);
 
             drawVLine(x+width, y, y+height/2);
             drawVLine(x+width, y+height/2, y+height);
 
-            //drawHLine(y, x, x+width);
 
             drawHLine(y+height, x, x+width);
 
-            //drawHLine(y+height/2, x, x+width);
             break;
         case '8':
 
@@ -752,7 +743,6 @@ void drawChar (int x, int y, char toDraw) {
             break;
         case '9':
 
-            //drawVLine(x, y, y+height/2);
             drawVLine(x, y+height/2, y+height);
 
             drawVLine(x+width, y, y+height/2);
@@ -769,10 +759,8 @@ void drawChar (int x, int y, char toDraw) {
             drawVLine(x, y, y+height/2);
             drawVLine(x, y+height/2, y+height);
 
-            //drawVLine(x+width, y, y+height/2);
             drawVLine(x+width, y+height/2, y+height);
 
-            //drawHLine(y, x, x+width);
 
             drawHLine(y+height, x, x+width);
 
@@ -785,15 +773,10 @@ void drawChar (int x, int y, char toDraw) {
 
             drawVLine(x+width*1.5, y, y+height/2);
             drawVLine(x+width*1.5, y+height/2, y+height);
-            
+
             drawLine(x, y, x+width*0.75, y+height);
 
             drawLine(x+width*0.75, y+height, x+width*1.5, y);
-            //drawHLine(y, x, x+width);
-
-            //drawHLine(y+height, x, x+width);
-
-            //drawHLine(y+height/2, x, x+width);
             break;
         case 'n':
 
@@ -802,30 +785,28 @@ void drawChar (int x, int y, char toDraw) {
 
             drawVLine(x+width, y, y+height/2);
             drawVLine(x+width, y+height/2, y+height);
-            
+
             drawLine(x, y+height, x+width, y);
-            //drawHLine(y, x, x+width);
-
-            //drawHLine(y+height, x, x+width);
-
-            //drawHLine(y+height/2, x, x+width);
             break;
     }
 }
 // }}}
 
+// get input from the first player
 int getInputA() {
     *ADC_CR = 0x2;
     while (*ADC_SR & 0x10 == 0);
     return *ADC_CDR4;
 }
 
+// get input from the second player
 int getInputB() {
     *ADC_CR = 0x2;
     while (*ADC_SR & 0x10 == 0);
     return *ADC_CDR5;
 }
 
+// tweak an input to be in the range 0-1023
 int adjustInput(int input) {
     int val = input * 2;
     if (val > 1023)
@@ -835,20 +816,25 @@ int adjustInput(int input) {
     return val;
 }
 
-//RANGE IS 0-1023
+//set the Y of the Oscilloscope
 void setY(int y) {
+    // first two bits of the data payload are ignored, so shift our value left by two places (y << 2)
+    // append our data to WRITE_A, defined at the top - this basically tells the processor to write to output A in fast mode without powering down.
     *SPI_TDR = WRITE_A | (y << 2);
+    // wait for the SPI to be ready for another input.
     waitForSPI();
-    //delay(0x0001);
 }
 
-//RANGE IS 0-1023
+// set the x of the oscilloscope
 void setX(int x) {
+    // first two bits of the data payload are ignored, so shift our value left by two places (y << 2)
+    // append our data to WRITE_A, defined at the top - this basically tells the processor to write to output A in fast mode without powering down.
     *SPI_TDR = WRITE_B | (x << 2);
+    // wait for the SPI to be ready for another input.
     waitForSPI();
-    //delay(0x0001);
 }
 
+// draw a vertical line at x, from starty to endy
 void drawVLine(int x, int startY, int endY) {
     register int i;
     setX(x);
@@ -857,6 +843,7 @@ void drawVLine(int x, int startY, int endY) {
     }
 }
 
+// draw a horizontal line at y, from startX to endX
 void drawHLine(int y, int startX, int endX) {
     register int i;
     setY(y);
@@ -865,14 +852,18 @@ void drawHLine(int y, int startX, int endX) {
     }
 }
 
+// draw a line between the two points - can be diagonal
 void drawLine(int startX, int startY, int endX, int endY) {
     float dX = endX - startX;
     float dY = endY - startY;
 
+    // might be overkill, but we had enough time and didn't want it looking dotty
     int interval = 100;
 
     dX /= interval;
     dY /= interval;
+
+    // divide the difference between the two points into _interval_ pieces and move the dot to each location. 
 
     register int i = 0;
     for (i = 0; i <= interval; i++) {
@@ -881,6 +872,7 @@ void drawLine(int startX, int startY, int endX, int endY) {
     }
 }
 
+// simple delay function. do nothing for _count_ frames.
 void delay(int count)
 {
     register int i;
@@ -888,7 +880,9 @@ void delay(int count)
         ;
 }
 
+// wait until the serial interface is ready to get more data.
 void waitForSPI() {
+    // specifically, wait until bit 1 of the SPI status register is 1 - this indicates that the conversion has finished and SPI_TDR is ready to receive more data.
     while (*SPI_SR & 2 != 2)
         continue;
 }
