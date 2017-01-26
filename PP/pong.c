@@ -794,7 +794,7 @@ void drawChar (int x, int y, char toDraw) {
 
 // get input from the first player
 int getInputA() {
-    *ADC_CR = 0x2;
+    *ADC_CR = 0x2; //start conversion
     while (*ADC_SR & 0x10 == 0);
     return *ADC_CDR4;
 }
